@@ -4,52 +4,61 @@ import os
 import json
 import logging
 from operator import attrgetter, itemgetter
-from .utils import retrieve_id, associate_medias
+from typing import List
+
+from .utils import retrieve_id, create_tweet_url
+from .tweets_data import ListingData
+import dateutil.parser
+
 
 def create_url(id, limit, next_token):
-    url = f"https://api.twitter.com/2/users/{id}/tweets" \
-        f"?max_results={limit}" \
-        f"&tweet.fields=public_metrics,created_at" \
-        f"&exclude=retweets" \
-        f"&expansions=attachments.media_keys" \
+    url = (
+        f"https://api.twitter.com/2/users/{id}/tweets"
+        f"?max_results={limit}"
+        f"&tweet.fields=public_metrics,created_at"
+        f"&exclude=retweets"
+        f"&expansions=attachments.media_keys,author_id"
         f"&media.fields=url,type,preview_image_url"
+        f"&user.fields=name"
+    )
     if next_token:
         url += f"&pagination_token={next_token}"
     return url
 
 
-def filter_and_sort(
-    tweets,
-    filters
-):
-    filtered = []
-    if filters["text"]:
-        filtered += list(filter(lambda x: not "media_type" in x, tweets))
-    if filters["photo"]:
-        filtered += list(filter(lambda x: "media_type" in x and x["media_type"] == "photo", tweets))
-    if filters["video"]:
-        filtered += list(filter(lambda x: "media_type" in x and x["media_type"] == "video", tweets))
-    filtered = sorted(filtered, reverse=True, key=lambda x: x["public_metrics"]["like_count"])
-    return filtered
+def create_top_answer(data: ListingData):
+    answer = (
+        "@"
+        + data.tweets[0].username
+        + " "
+        + str(data.meta.count)
+        + " tweets from "
+        + str(dateutil.parser.isoparse(data.meta.oldest).strftime("%Y-%m-%d %H:%M"))
+        + " to "
+        + str(dateutil.parser.isoparse(data.meta.newest).strftime("%Y-%m-%d %H:%M"))
+        + "\n"
+    )
+    for i in range(5):
+        answer += (
+            str(data.tweets[i].public_metrics["like_count"])
+            + "\U00002665"
+            + " : "
+            + create_tweet_url(data.tweets[i].id)
+            + "\n"
+        )
+    return answer
 
-def retrieve_top_tweets(
-    name,
-    nb,
-    filters
-):
+
+def retrieve_top_tweets(name: str, nb: int, filters):
     id = retrieve_id(name)
+    if not id:
+        return None
     limit = 100 if nb > 100 else max(nb, 5)
     next_token = None
-    logging.info("Now retrieving tweets of", name)
+    logging.info("Now retrieving tweets of " + name)
     medias = []
-    data = {
-        "tweets": [],
-        "meta": {
-            "count": 0,
-            "oldest": None,
-            "newest": None
-        },
-    }
+    users = []
+    data = ListingData()
     while nb > 0:
         url = create_url(id, limit, next_token)
         headers = {
@@ -58,9 +67,9 @@ def retrieve_top_tweets(
         r = requests.get(url, headers=headers)
         result = r.json()
         try:
-            data["tweets"] += result["data"]
+            data.set_tweets_from_listing(result)
             medias += result["includes"]["media"]
-            associate_medias(data["tweets"], medias)
+            users += result["includes"]["users"]
             if not "next_token" in result["meta"]:
                 break
             next_token = result["meta"]["next_token"]
@@ -69,8 +78,6 @@ def retrieve_top_tweets(
             break
         nb -= limit
         limit = 100 if nb > 100 else max(nb, 5)
-    data["tweets"] = filter_and_sort(data["tweets"], filters)
-    data["meta"]["count"] = len(data["tweets"])
-    data["meta"]["oldest"] = data["tweets"][-1]["created_at"]
-    data["meta"]["newest"] = data["tweets"][0]["created_at"]
-    print(json.dumps(data))
+    data.set_metadata(users, medias)
+    data.sort_by_likes()
+    return data
