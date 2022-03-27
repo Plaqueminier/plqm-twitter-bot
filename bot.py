@@ -24,7 +24,7 @@ def call_top(command: List[str], tweet: Tweet) -> None:
         )
         return
     if data.meta.count > 0:
-        send_tweet(create_top_answer(data), tweet.id)
+        send_tweet(create_top_answer(data, tweet.username), tweet.id)
 
 
 commands = {"/top": call_top}

@@ -1,3 +1,4 @@
+import string
 import requests
 from dotenv import load_dotenv
 import os
@@ -26,10 +27,10 @@ def create_url(id, limit, next_token):
     return url
 
 
-def create_top_answer(data: ListingData):
+def create_top_answer(data: ListingData, username: string):
     answer = (
         "@"
-        + data.tweets[0].username
+        + username
         + " "
         + str(data.meta.count)
         + " tweets from "
